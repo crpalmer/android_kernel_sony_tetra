@@ -432,6 +432,20 @@ config USE_JAVA_SPINLOCK
 	  there could be issues seen in the spinlocks. Enabling this option
 	  would replace the WFE and SEV with NOP.
 
+config SIMPLE_PLUG
+	bool "Enable simple-plug cpu hotplug driver"
+	default n
+	help
+	  Generic simple-plug cpu hotplug driver for ARM SOCs
+
+config SIMPLE_PLUG_STATS
+	bool "Enable simple-plug run-time statistics"
+	depends on SIMPLE_PLUG
+	default n
+	help
+	  This adds a slight CPU cost and therefore is disabled
+	  by default.
+
 endmenu
 
 endif

@@ -81,4 +81,6 @@ endif
 
 obj-$(CONFIG_MACH_JAVA_SONY) += java.o java_wifi.o sony/
 
+obj-$(CONFIG_SIMPLE_PLUG) += simple_plug.o
+
 CFLAGS_dm.o :=$(call as-instr,.arch_extension sec,-DSMC_INSTR=1)
