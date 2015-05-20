@@ -2375,6 +2375,8 @@ CSL_LCD_RES_T CSL_DSI_OpenClient(UInt32 bus, CSL_LCD_HANDLE *clientH)
 	return res;
 }
 
+extern void simple_plug_notify_ulps(int);
+
 /*
  *
  * Function Name: CSL_DSI_Ulps
@@ -2414,6 +2416,10 @@ CSL_LCD_RES_T CSL_DSI_Ulps(CSL_LCD_HANDLE client, Boolean on)
 			printk(KERN_DEBUG"DSI: exit ulps\n");
 		}
 	}
+
+#ifdef CONFIG_SIMPLE_PLUG
+	simple_plug_notify_ulps(dsiH->ulps);
+#endif
 
 	if (!clientH->hasLock)
 		OSSEMAPHORE_Release(dsiH->semaDsi);

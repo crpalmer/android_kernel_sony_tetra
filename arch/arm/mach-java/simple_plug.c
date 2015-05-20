@@ -31,6 +31,8 @@ static struct {
 
 static struct work_struct work;
 static struct timer_list update_timer;
+static struct mutex update_timer_mutex;
+static unsigned int ulps_active;
 
 /* Zero disables the hotplug driver and 1 enables it.  Normally it is enabled
  * once the boot has completed.
@@ -137,6 +139,10 @@ static unsigned desired_number_of_cores(void)
 {
 	unsigned int up_cores, down_cores;
 	int avg;
+
+	/* If we are in ulps mode then we never want extra cores online */
+	if (ulps_active)
+		return 1;
 
 	/* Compute number of cores of average active work (runnable tasks).
 	 * To add core N we must have a load of at least N+0.5 runnables.
@@ -257,16 +263,26 @@ static unsigned long expires(unsigned int ms)
 static void start_timer(unsigned int ms)
 {
 	pr_info(PR_NAME "starting update_timer");
+	mutex_lock(&update_timer_mutex);
 #ifdef CONFIG_SIMPLE_PLUG_STATS
 	last_stat_us = ktime_to_us(ktime_get());
 #endif
 	update_timer.expires = expires(ms);
 	add_timer_on(&update_timer, 0);
+	mutex_unlock(&update_timer_mutex);
+}
+
+static void schedule_next_timer_locked(void)
+{
+	if (! ulps_active)
+		mod_timer_pinned(&update_timer, expires(sampling_ms));
 }
 
 static void schedule_next_timer(void)
 {
-	mod_timer_pinned(&update_timer, expires(sampling_ms));
+	mutex_lock(&update_timer_mutex);
+	schedule_next_timer_locked();
+	mutex_unlock(&update_timer_mutex);
 }
 
 static bool consider_scheduling_verify_cores(void)
@@ -290,6 +306,24 @@ static bool consider_scheduling_up_down_cores(unsigned int desired_n_online)
 	return true;
 }
 
+static void do_schedule_work(unsigned int desired_n_online)
+{
+	work_data.desired_n_online = desired_n_online;
+	schedule_work(&work);
+}
+
+void simple_plug_notify_ulps(int new_ulps_active)
+{
+	mutex_lock(&update_timer_mutex);
+	ulps_active = new_ulps_active;
+	if (active) {
+		if (ulps_active && consider_scheduling_up_down_cores(1))
+			do_schedule_work(1);
+		schedule_next_timer_locked();
+	}
+	mutex_unlock(&update_timer_mutex);
+}
+
 static void simple_plug_timer_work(void)
 {
 	bool launch_work = false;
@@ -311,8 +345,7 @@ static void simple_plug_timer_work(void)
 
 	if (launch_work) {
 		dump_history(desired_n_online);
-		work_data.desired_n_online = desired_n_online;
-		schedule_work(&work);
+		do_schedule_work(desired_n_online);
 	}
 }
 
@@ -473,6 +506,7 @@ static int __init simple_plug_init(void)
 	INIT_WORK(&work, work_fn);
 	init_timer_deferrable(&update_timer);
 	update_timer.function = simple_plug_update_fn;
+	mutex_init(&update_timer_mutex);
 
 	rc = sysfs_create_group(&cpu_subsys.dev_root->kobj, &simple_plug_attr_group);
 	BUG_ON(rc);
