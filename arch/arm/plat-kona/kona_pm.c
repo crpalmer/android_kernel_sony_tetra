@@ -153,8 +153,8 @@ static int __kona_pm_enter_idle(struct cpuidle_device *dev,
 		instrument_idle_exit();
 		atomic_notifier_call_chain(&pm_prms.cstate_nh, CSTATE_EXIT,
 				&index);
-		local_irq_enable();
 		local_fiq_enable();
+		local_irq_enable();
 	}
 	return (mach_ret == -1) ? index : mach_ret;
 }
