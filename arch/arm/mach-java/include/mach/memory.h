@@ -29,11 +29,7 @@
 #include <mach/vmalloc.h>
 #include <mach/io.h>
 
-#ifndef PHYS_OFFSET
-#define PHYS_OFFSET	(CONFIG_BCM_RAM_BASE+CONFIG_BCM_RAM_START_RESERVED_SIZE)
-#endif
-
-#define PLAT_PHYS_OFFSET	PHYS_OFFSET
+#define PLAY_PHYS_OFFSET	(CONFIG_BCM_RAM_BASE+CONFIG_BCM_RAM_START_RESERVED_SIZE)
 
 /* The reason for 32M.
  * There was a need for a way to fix the

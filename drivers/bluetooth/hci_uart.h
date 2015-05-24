@@ -69,6 +69,7 @@ struct hci_uart {
 	unsigned long		hdev_flags;
 
 	struct work_struct	init_ready;
+	struct work_struct	write_work;
 
 	struct hci_uart_proto	*proto;
 	void			*priv;
