@@ -380,6 +380,13 @@ static void bcm_sdiowl_term(void)
 
 #define WLAN_STATIC_SCAN_BUF0		5
 #define WLAN_STATIC_SCAN_BUF1		6
+#define WLAN_STATIC_DHD_WLFC_INFO	8
+#define WLAN_STATIC_DHD_WLFC_HANGER	12
+
+#define WLAN_SCAN_BUF_SIZE		(64 * 1024)
+#define WLAN_STATIC_DHD_WLFC_INFO_SIZE		(24 * 1024)
+#define WLAN_STATIC_DHD_WLFC_HANGER_SIZE	(64 * 1024)
+
 #define PREALLOC_WLAN_SEC_NUM		4
 #define PREALLOC_WLAN_BUF_NUM		160
 #define PREALLOC_WLAN_SECTION_HEADER	24
@@ -407,8 +414,10 @@ static struct wlan_mem_prealloc wlan_mem_array[PREALLOC_WLAN_SEC_NUM] = {
 	{NULL, (WLAN_SECTION_SIZE_3 + PREALLOC_WLAN_SECTION_HEADER)}
 };
 
-void *wlan_static_scan_buf0;
-void *wlan_static_scan_buf1;
+void *wlan_static_scan_buf0 = NULL;
+void *wlan_static_scan_buf1 = NULL;
+void *wlan_static_dhd_wlfc_info = NULL;
+void *wlan_static_dhd_wlfc_hanger = NULL;
 
 static void *hawaii_wifi_mem_prealloc(int section, unsigned long size)
 {
@@ -418,6 +427,27 @@ static void *hawaii_wifi_mem_prealloc(int section, unsigned long size)
 		return wlan_static_scan_buf0;
 	if (section == WLAN_STATIC_SCAN_BUF1)
 		return wlan_static_scan_buf1;
+
+	if (section == WLAN_STATIC_DHD_WLFC_INFO)  {
+		if (size > WLAN_STATIC_DHD_WLFC_INFO_SIZE) {
+			pr_err("request DHD_WLFC_INFO size(%lu) is bigger than"
+				" static size(%d).\n",
+				size, WLAN_STATIC_DHD_WLFC_INFO_SIZE);
+			return NULL;
+		}
+		return wlan_static_dhd_wlfc_info;
+	}
+
+	if (section == WLAN_STATIC_DHD_WLFC_HANGER)  {
+		if (size > WLAN_STATIC_DHD_WLFC_HANGER_SIZE) {
+			pr_err("request DHD_WLFC_HANGER size(%lu) is bigger than"
+				" static size(%d).\n",
+				size, WLAN_STATIC_DHD_WLFC_HANGER_SIZE);
+			return NULL;
+		}
+		return wlan_static_dhd_wlfc_hanger;
+	}
+
 	if ((section < 0) || (section > PREALLOC_WLAN_SEC_NUM))
 		return NULL;
 
@@ -455,18 +485,50 @@ int __init hawaii_init_wifi_mem(void)
 		if (!wlan_mem_array[i].mem_ptr)
 			goto err_mem_alloc;
 	}
-	wlan_static_scan_buf0 = kmalloc(65536, GFP_KERNEL);
-	if (!wlan_static_scan_buf0)
+	wlan_static_scan_buf0 = kmalloc(WLAN_SCAN_BUF_SIZE, GFP_KERNEL);
+	if (!wlan_static_scan_buf0) {
+		pr_err("Failed to alloc wlan_static_scan_buf0\n");
 		goto err_mem_alloc;
-	wlan_static_scan_buf1 = kmalloc(65536, GFP_KERNEL);
-	if (!wlan_static_scan_buf1)
-		goto err_mem_alloc;
+	}
 
-	printk(KERN_ERR "%s: WIFI MEM Allocated\n", __func__);
+	wlan_static_scan_buf1 = kmalloc(WLAN_SCAN_BUF_SIZE, GFP_KERNEL);
+	if (!wlan_static_scan_buf1) {
+		pr_err("Failed to alloc wlan_static_scan_buf1\n");
+		goto err_mem_alloc;
+	}
+
+	wlan_static_dhd_wlfc_info = kmalloc(WLAN_STATIC_DHD_WLFC_INFO_SIZE,
+			GFP_KERNEL);
+	if (!wlan_static_dhd_wlfc_info) {
+		pr_err("Failed to alloc wlan_static_dhd_wlfc_info\n");
+		goto err_mem_alloc;
+	}
+
+	wlan_static_dhd_wlfc_hanger = kmalloc(WLAN_STATIC_DHD_WLFC_HANGER_SIZE,
+		GFP_KERNEL);
+	if (!wlan_static_dhd_wlfc_hanger) {
+		pr_err("Failed to alloc wlan_static_dhd_wlfc_hanger\n");
+		goto err_mem_alloc;
+	}
+
+	pr_err("%s: WIFI MEM Allocated\n", __FUNCTION__);
 	return 0;
 
 err_mem_alloc:
+	if (wlan_static_dhd_wlfc_info)
+		kfree(wlan_static_dhd_wlfc_info);
+
+	if (wlan_static_dhd_wlfc_hanger)
+		kfree(wlan_static_dhd_wlfc_hanger);
+
+	if (wlan_static_scan_buf1)
+		kfree(wlan_static_scan_buf1);
+
+	if (wlan_static_scan_buf0)
+		kfree(wlan_static_scan_buf0);
+
 	pr_err("Failed to mem_alloc for WLAN\n");
+
 	for (j = 0; j < i; j++)
 		kfree(wlan_mem_array[j].mem_ptr);
 
@@ -613,48 +675,68 @@ struct cntry_locales_custom {
 static struct cntry_locales_custom
 	hawaii_wifi_translate_custom_table[] = {
 /* Table should be filled out based on custom platform regulatory requirement */
-	{"", "XY", 4},		/* universal */
-	{"US", "US", 69},	/* input ISO "US" to : US regrev 69 */
-	{"CA", "US", 69},	/* input ISO "CA" to : US regrev 69 */
-	{"EU", "EU", 5},	/* European union countries */
-	{"AT", "EU", 5},
-	{"BE", "EU", 5},
-	{"BG", "EU", 5},
-	{"CY", "EU", 5},
-	{"CZ", "EU", 5},
-	{"DK", "EU", 5},
-	{"EE", "EU", 5},
-	{"FI", "EU", 5},
-	{"FR", "EU", 5},
-	{"DE", "EU", 5},
-	{"GR", "EU", 5},
-	{"HU", "EU", 5},
-	{"IE", "EU", 5},
-	{"IT", "EU", 5},
-	{"LV", "EU", 5},
-	{"LI", "EU", 5},
-	{"LT", "EU", 5},
-	{"LU", "EU", 5},
-	{"MT", "EU", 5},
-	{"NL", "EU", 5},
-	{"PL", "EU", 5},
-	{"PT", "EU", 5},
-	{"RO", "EU", 5},
-	{"SK", "EU", 5},
-	{"SI", "EU", 5},
-	{"ES", "EU", 5},
-	{"SE", "EU", 5},
-	{"GB", "EU", 5},	/* input ISO "GB" to : EU regrev 05 */
-	{"IL", "IL", 0},
-	{"CH", "CH", 0},
-	{"TR", "TR", 0},
-	{"NO", "NO", 0},
-	{"KR", "XY", 3},
-	{"AU", "XY", 3},
-	{"CN", "XY", 3},	/* input ISO "CN" to : XY regrev 03 */
-	{"TW", "XY", 3},
-	{"AR", "XY", 3},
-	{"MX", "XY", 3}
+                {"AR", "AR", 1},
+                {"AT", "AT", 1},
+                {"AU", "AU", 2},
+                {"BE", "BE", 1},
+                {"BG", "BG", 1},
+                {"BN", "BN", 1},
+                {"CA", "CA", 2},
+                {"CH", "CH", 1},
+                {"CY", "CY", 1},
+                {"CZ", "CZ", 1},
+                {"DE", "DE", 3},
+                {"DK", "DK", 1},
+                {"EE", "EE", 1},
+                {"ES", "ES", 1},
+                {"FI", "FI", 1},
+                {"FR", "FR", 1},
+                {"GB", "GB", 1},
+                {"GR", "GR", 1},
+                {"HR", "HR", 1},
+                {"HU", "HU", 1},
+                {"IE", "IE", 1},
+                {"IS", "IS", 1},
+                {"IT", "IT", 1},
+                {"JP", "JP", 5},
+                {"KR", "KR", 24},
+                {"KW", "KW", 1},
+                {"LI", "LI", 1},
+                {"LT", "LT", 1},
+                {"LU", "LU", 1},
+                {"LV", "LV", 1},
+                {"MT", "MT", 1},
+                {"NL", "NL", 1},
+                {"NO", "NO", 1},
+                {"PL", "PL", 1},
+                {"PT", "PT", 1},
+                {"PY", "PY", 1},
+                {"RO", "RO", 1},
+                {"RU", "RU", 13},
+                {"SE", "SE", 1},
+                {"SI", "SI", 1},
+                {"SK", "SK", 1},
+                {"TW", "TW", 2},
+                {"",   "XZ", 11}, /* Universal if Country code is unknown or empty */
+                {"IR", "XZ", 11}, /* Universal if Country code is IRAN, (ISLAMIC REPUBLIC OF) */
+                {"SD", "XZ", 11}, /* Universal if Country code is SUDAN */
+                {"SY", "XZ", 11}, /* Universal if Country code is SYRIAN ARAB REPUBLIC */
+                {"GL", "XZ", 11}, /* Universal if Country code is GREENLAND */
+                {"PS", "XZ", 11}, /* Universal if Country code is PALESTINIAN TERRITORY, OCCUPIED */
+                {"TL", "XZ", 11}, /* Universal if Country code is TIMOR-LESTE (EAST TIMOR) */
+                {"MH", "XZ", 11}, /* Universal if Country code is MARSHALL ISLANDS */
+                {"US", "US", 109},
+                {"UA", "UA", 8},
+                {"CO", "CO", 4},
+                {"ID", "ID", 1},
+                {"LA", "LA", 1},
+                {"LB", "LB", 2},
+                {"VN", "VN", 4},
+                {"MA", "MA", 1},
+                {"TR", "TR", 7},
+                {"AE", "AE", 1},
+                {"MX", "MX", 1},
+                {"CN", "CN", 11},
 };
 
 static void *hawaii_wifi_get_country_code(char *ccode)

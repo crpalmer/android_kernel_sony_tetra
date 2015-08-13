@@ -30,10 +30,13 @@
 #include <linux/io.h>
 #include <mach/sram_config.h>
 #include <plat/cdc.h>
+#include <asm/fiq.h>
+#include <linux/broadcom/kona_sec_wd.h>
+#include <linux/dma-mapping.h>
 
 #define SEC_EXIT_NORMAL			1
 #define SEC_WD_TAP_DELAY		12000
-#define SSAPI_ACTIVATE_SEC_WATCHDOG     0x01000006
+#define SSAPI_ACTIVATE_SEC_WATCHDOG     0x0100000A
 #define SSAPI_ENABLE_SEC_WATCHDOG       0x01000007
 #define SSAPI_DISABLE_SEC_WATCHDOG      0x01000008
 #define SSAPI_PAT_SEC_WATCHDOG		0x01000009
@@ -46,13 +49,7 @@ enum sec_wd_state_e {
 	SEC_WD_PAT_BEGIN = 0,
 	SEC_WD_PAT_DONE,
 	SEC_WD_SET_NEXT_EVENT,
-	SEC_WD_SET_RETY,
 	PAT_STATES,
-};
-
-struct track_sec_wd {
-	struct timeval trk_sec_wd_pat[PAT_STATES];
-	struct timeval trk_sec_wd_on[WD_STATES];
 };
 
 struct sec_wd_core_st {
@@ -60,38 +57,41 @@ struct sec_wd_core_st {
 	struct delayed_work sec_wd_work;
 	struct notifier_block sec_wd_panic_block;
 	struct notifier_block sec_wd_reboot_block;
-	struct track_sec_wd trk_sec_wd;
 	unsigned int sec_wd_enabled_mode;
+};
+
+struct sec_wd_tracker {
 	unsigned int is_sec_wd_on;
 	unsigned int is_sec_pat_done;
-	unsigned int cdc_error_count;
-	unsigned int sec_pat_retry;
 };
 
 static struct sec_wd_core_st sec_wd_core;
+static struct sec_wd_tracker *sec_wd_trk;
 
 static void sec_wd_pat(struct work_struct *work)
 {
 	struct sec_wd_core_st *swdc = &sec_wd_core;
-	if (swdc->is_sec_wd_on == SEC_WD_ENABLE) {
-		swdc->sec_pat_retry = 0;
-		swdc->is_sec_pat_done = SEC_WD_PAT_BEGIN;
-		do_gettimeofday(&swdc->
-		trk_sec_wd.trk_sec_wd_pat[SEC_WD_PAT_BEGIN]);
-		printk(KERN_ALERT "patting watchdog\n");
-		secure_api_call_local(SSAPI_PAT_SEC_WATCHDOG);
-		swdc->is_sec_pat_done = SEC_WD_PAT_DONE;
-		do_gettimeofday(&swdc->
-		trk_sec_wd.trk_sec_wd_pat[SEC_WD_PAT_DONE]);
+
+	if (sec_wd_trk->is_sec_wd_on == SEC_WD_ENABLE) {
+		sec_wd_trk->is_sec_pat_done = SEC_WD_PAT_BEGIN;
+		secure_api_call(SSAPI_PAT_SEC_WATCHDOG, 0, 0, 0, 0);
+		sec_wd_trk->is_sec_pat_done = SEC_WD_PAT_DONE;
 		queue_delayed_work_on(0, swdc->sec_wd_wq, &swdc->sec_wd_work,
 		msecs_to_jiffies(SEC_WD_TAP_DELAY));
-		swdc->is_sec_pat_done = SEC_WD_SET_NEXT_EVENT;
-		do_gettimeofday(&swdc->
-		trk_sec_wd.trk_sec_wd_pat[SEC_WD_SET_NEXT_EVENT]);
+		sec_wd_trk->is_sec_pat_done = SEC_WD_SET_NEXT_EVENT;
 	} else {
 		printk(KERN_ALERT "patting watchdog disable\n");
 	}
 }
+
+void sec_wd_touch(void)
+{
+	if (sec_wd_trk->is_sec_wd_on == SEC_WD_ENABLE) {
+		printk(KERN_ALERT "____touch the secure watchdog <prolonged path>___\n");
+		secure_api_call(SSAPI_PAT_SEC_WATCHDOG, 0, 0, 0, 0);
+	}
+}
+EXPORT_SYMBOL(sec_wd_touch);
 
 static void init_patter(void)
 {
@@ -101,58 +101,17 @@ static void init_patter(void)
 	msecs_to_jiffies(SEC_WD_TAP_DELAY));
 }
 
-void sec_wd_suspend(void)
-{
-	int ret;
-	struct sec_wd_core_st *swdc = &sec_wd_core;
-
-	if (swdc->is_sec_wd_on == SEC_WD_DISABLE)
-		return;
-
-	ret = secure_api_call_local(SSAPI_DISABLE_SEC_WATCHDOG);
-	if (ret == 1) {
-		swdc->is_sec_wd_on = SEC_WD_DISABLE;
-		do_gettimeofday(&swdc->
-		trk_sec_wd.trk_sec_wd_on[SEC_WD_DISABLE]);
-		printk(KERN_ALERT "___suspend:disabling secure watchdog...done\n");
-	} else {
-		printk(KERN_ALERT "___suspend:disabling secure watchdog...fail\n");
-	}
-}
-EXPORT_SYMBOL(sec_wd_suspend);
-
-void sec_wd_resume(void)
-{
-	int ret;
-	struct sec_wd_core_st *swdc = &sec_wd_core;
-
-	if (swdc->is_sec_wd_on == SEC_WD_ENABLE)
-		return;
-
-	ret = secure_api_call_local(SSAPI_ENABLE_SEC_WATCHDOG);
-	if (ret == 1) {
-		swdc->is_sec_wd_on = SEC_WD_ENABLE;
-		do_gettimeofday(&swdc->trk_sec_wd.trk_sec_wd_on[SEC_WD_ENABLE]);
-		printk(KERN_ALERT "___resume:enabling secure watchdog...done\n");
-	} else {
-		printk(KERN_ERR "___resume:enabling secure watchdog...fail\n");
-	}
-}
-EXPORT_SYMBOL(sec_wd_resume);
-
 void sec_wd_enable(void)
 {
 	int ret;
 	struct sec_wd_core_st *swdc = &sec_wd_core;
 
-	if (swdc->is_sec_wd_on == SEC_WD_ENABLE)
+	if (sec_wd_trk->is_sec_wd_on == SEC_WD_ENABLE)
 		return;
 
-	ret = secure_api_call(SSAPI_ENABLE_SEC_WATCHDOG, 0, 0, 0, 0);
+	ret = secure_api_call_local(SSAPI_ENABLE_SEC_WATCHDOG);
 	if (ret == 1) {
-		swdc->is_sec_wd_on = SEC_WD_ENABLE;
-		do_gettimeofday(&swdc->trk_sec_wd.trk_sec_wd_on[SEC_WD_ENABLE]);
-		printk(KERN_ALERT "___resume:enabling secure watchdog...done\n");
+		sec_wd_trk->is_sec_wd_on = SEC_WD_ENABLE;
 		queue_delayed_work_on(0, swdc->sec_wd_wq, &swdc->sec_wd_work,
 		msecs_to_jiffies(SEC_WD_TAP_DELAY));
 	} else {
@@ -164,9 +123,8 @@ EXPORT_SYMBOL(sec_wd_enable);
 void sec_wd_disable(void)
 {
 	int ret;
-	struct sec_wd_core_st *swdc = &sec_wd_core;
 
-	if (swdc->is_sec_wd_on == SEC_WD_DISABLE)
+	if (sec_wd_trk->is_sec_wd_on == SEC_WD_DISABLE)
 		return;
 
 	/* we do not need following piece of code
@@ -185,14 +143,10 @@ void sec_wd_disable(void)
 	no work function is running anywhere in the system.
 	this is the safest place to disabled watchdog. */
 
-	ret = secure_api_call(SSAPI_DISABLE_SEC_WATCHDOG,
-	0, 0, 0, 0);
+	ret = secure_api_call_local(SSAPI_DISABLE_SEC_WATCHDOG);
 
 	if (ret == 1) {
-		do_gettimeofday(&swdc->
-		trk_sec_wd.trk_sec_wd_on[SEC_WD_DISABLE]);
-		printk(KERN_ALERT "___suspend:disabling secure watchdog...done\n");
-		swdc->is_sec_wd_on = SEC_WD_DISABLE;
+		sec_wd_trk->is_sec_wd_on = SEC_WD_DISABLE;
 	} else {
 		printk(KERN_ALERT "___suspend:disabling secure watchdog...fail\n");
 	}
@@ -202,14 +156,22 @@ EXPORT_SYMBOL(sec_wd_disable);
 static int sec_wd_panic_event(struct notifier_block *this,
 		unsigned long event, void *ptr)
 {
+       if (sec_wd_trk->is_sec_wd_on == SEC_WD_DISABLE)
+               return NOTIFY_DONE;
+
 	secure_api_call(SSAPI_DISABLE_SEC_WATCHDOG, 0, 0, 0, 0);
+	sec_wd_trk->is_sec_wd_on = SEC_WD_DISABLE;
 	return NOTIFY_DONE;
 }
 
 static int sec_wd_reboot_event(struct notifier_block *this,
 		unsigned long event, void *ptr)
 {
+       if (sec_wd_trk->is_sec_wd_on == SEC_WD_DISABLE)
+               return NOTIFY_DONE;
+
 	secure_api_call(SSAPI_DISABLE_SEC_WATCHDOG, 0, 0, 0, 0);
+	sec_wd_trk->is_sec_wd_on = SEC_WD_DISABLE;
 	return NOTIFY_DONE;
 }
 
@@ -227,50 +189,93 @@ int is_soft_reset_boot(void)
 
 int is_power_on_reset(void)
 {
-	unsigned int *reset_reason = (unsigned int *)
-		ioremap(SRAM_RST_REASON_BASE, 0x4);
-	unsigned int rst;
+	u32 reg;
+	int pon_rst;
 
-	pr_debug("%s: reset_reason 0x%x\n", __func__, *reset_reason);
+	reg = readl(KONA_ROOT_RST_VA + ROOT_RST_MGR_REG_RSTSTS_OFFSET);
+	pon_rst = (reg & ROOT_RST_MGR_REG_RSTSTS_PORRST_DET_MASK)
+		>> ROOT_RST_MGR_REG_RSTSTS_PORRST_DET_SHIFT;
 
-	rst = (*reset_reason) & RST_REASON_MASK;
-
-	iounmap(reset_reason);
-	if (rst == POWERON_RESET)
-		return 1;
-	else
-		return 0;
-
+	return pon_rst;
 }
 
-static int __devinit sec_wd_probe(struct platform_device *pdev)
+static struct fiq_handler fh = {
+		.name = "sec_wd_fiq"
+};
+
+static DEFINE_PER_CPU(struct pt_regs, sec_wd_fiq_regs);
+
+/*
+ * sec_wd_fiq_reg_setup: Called on each CPU to set up FIQ handler regs
+ * input: unused
+ * output: none
+ * return: none
+ */
+static void sec_wd_fiq_reg_setup(void *info)
+{
+	/* NB - secure code may mean handler doesn't see these registers */
+	struct pt_regs r;
+	get_fiq_regs(&r);
+	r.ARM_sp = (unsigned long) (&__get_cpu_var(sec_wd_fiq_regs));
+	set_fiq_regs(&r);
+}
+
+asmlinkage void sec_wd_fiq(struct pt_regs *regs)
+{
+	/* If we come in through our assembler, we're on the original SVC
+	 * mode stack, with nothing extra pushed. Good for unwinding, bad if
+	 * the stack was broken.
+	 */
+	int err = 0;
+	/*
+	 * We could be in big trouble if we ever try to claim any spinlocks
+	 * that were held at the instant the FIQ triggered. die() makes some
+	 * effort to avoid problems with printk(), but try a bit harder to
+	 * bust some more locks here.
+	 */
+	console_verbose();
+	die("secure watchdog FIQ", regs, err);
+	panic("secure watchdog FIQ");
+}
+
+static int sec_wd_probe(struct platform_device *pdev)
 {
 	struct sec_wd_core_st *swdc = &sec_wd_core;
+	int ret;
+	dma_addr_t p;
+        void *v;
+	sec_wd_trk = dma_alloc_coherent(NULL, sizeof(struct sec_wd_tracker), &p, GFP_KERNEL);
+	if (sec_wd_trk == NULL) {
+		pr_err("%s:dma_alloc_coherent failed\n", __func__);
+		BUG_ON(1);
+	}
 
-	swdc->sec_wd_enabled_mode = 0;
+	swdc->sec_wd_enabled_mode = 1;
+	swdc->sec_wd_panic_block.notifier_call = sec_wd_panic_event;
+	swdc->sec_wd_panic_block.priority = INT_MAX;
 
-	if (is_soft_reset_boot() || is_power_on_reset()) {
-		swdc->sec_wd_enabled_mode = 1;
-		swdc->sec_wd_panic_block.notifier_call = sec_wd_panic_event;
-		swdc->sec_wd_panic_block.priority = INT_MAX;
+	swdc->sec_wd_reboot_block.notifier_call = sec_wd_reboot_event;
+	swdc->sec_wd_reboot_block.priority = INT_MAX;
+	sec_wd_trk->is_sec_wd_on = SEC_WD_DISABLE;
 
-		swdc->sec_wd_reboot_block.notifier_call = sec_wd_reboot_event;
-		swdc->sec_wd_reboot_block.priority = INT_MAX;
-		swdc->is_sec_wd_on = SEC_WD_DISABLE;
-		swdc->cdc_error_count = 0;
-		swdc->sec_pat_retry = 0;
-
-		atomic_notifier_chain_register(&panic_notifier_list,
-				&swdc->sec_wd_panic_block);
-		blocking_notifier_chain_register(&reboot_notifier_list,
-				&swdc->sec_wd_reboot_block);
-		swdc->sec_wd_wq = create_singlethread_workqueue("sec_wd_wq");
-		if (!(swdc->sec_wd_wq)) {
-			printk(KERN_ALERT "___sec_wd_probe:alloc workqueue failed\n");
-			return -ENOMEM;
-		}
-	} else
-		printk(KERN_ALERT "_______disabling Sec watchdog_______\n");
+	atomic_notifier_chain_register(&panic_notifier_list,
+	&swdc->sec_wd_panic_block);
+	blocking_notifier_chain_register(&reboot_notifier_list,
+	&swdc->sec_wd_reboot_block);
+	swdc->sec_wd_wq = create_singlethread_workqueue("sec_wd_wq");
+	if (!(swdc->sec_wd_wq)) {
+		printk(KERN_ALERT "___sec_wd_probe:alloc workqueue failed\n");
+		return -ENOMEM;
+	}
+	ret = claim_fiq(&fh);
+	if (0 > ret) {
+		printk(KERN_ERR "%s:%d claim_fiq failed err=%d\n",
+		__func__, __LINE__, ret);
+		return ret;
+	}
+	on_each_cpu(sec_wd_fiq_reg_setup, NULL, true);
+	set_fiq_handler(&sec_wd_fiq_handler,
+	&sec_wd_fiq_handler_end - &sec_wd_fiq_handler);
 
 	printk(KERN_ALERT "_______sec_wd_probe succesfull_______\n");
 	return 0;
@@ -279,8 +284,8 @@ static int __devinit sec_wd_probe(struct platform_device *pdev)
 unsigned int sec_wd_activate(void)
 {
 	struct sec_wd_core_st *swdc = &sec_wd_core;
-	printk(KERN_ALERT "initializing secure watchdog....");
-	swdc->is_sec_wd_on = SEC_WD_ENABLE;
+	printk(KERN_ALERT "______initializing secure watchdog______\n");
+	sec_wd_trk->is_sec_wd_on = SEC_WD_ENABLE;
 	printk(KERN_ALERT "Active\n");
 	secure_api_call(SSAPI_ACTIVATE_SEC_WATCHDOG, 0, 0, 0, 0);
 	init_patter();
@@ -295,7 +300,7 @@ unsigned int is_sec_wd_enabled(void)
 }
 EXPORT_SYMBOL(is_sec_wd_enabled);
 
-static int __devexit sec_wd_remove(struct platform_device *pdev);
+static int sec_wd_remove(struct platform_device *pdev);
 
 
 static const struct of_device_id sec_wd_match[] = {
@@ -310,10 +315,10 @@ static struct platform_driver sec_wd_pltfm_driver = {
 	   .of_match_table = sec_wd_match,
 		   },
 	.probe = sec_wd_probe,
-	.remove = __devexit_p(sec_wd_remove),
+	.remove = sec_wd_remove,
 };
 
-static int __devexit sec_wd_remove(struct platform_device *pdev)
+static int sec_wd_remove(struct platform_device *pdev)
 {
 	if (is_sec_wd_enabled())
 		sec_wd_disable();

@@ -239,6 +239,18 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 	return error;
 }
 
+#ifdef CONFIG_SONY_JPROBE_SUSPEND_HOOK
+#define JPROBE_LINE_SZ  80
+static char jprobe_buf[JPROBE_LINE_SZ];
+static struct timespec jprobe_ts;
+static long int jprobe_total_suspended_ms = 0;
+static long int jprobe_total_resumed_ms = 0;
+noinline void idd_jprobe_suspend_hook(char *buf)
+{
+	asm("");
+}
+#endif
+
 /**
  * suspend_devices_and_enter - Suspend devices and enter system sleep state.
  * @state: System sleep state to enter.
@@ -269,6 +281,23 @@ int suspend_devices_and_enter(suspend_state_t state)
 	if (suspend_test(TEST_DEVICES))
 		goto Recover_platform;
 
+#ifdef CONFIG_SONY_JPROBE_SUSPEND_HOOK
+	{
+		struct timespec now;
+		struct timespec delta;
+		long int delta_ms;
+
+		get_monotonic_boottime(&now);
+		delta = timespec_sub(now, jprobe_ts);
+		jprobe_ts = now;
+		delta_ms = delta.tv_sec * 1000 + delta.tv_nsec / 1000000;
+		jprobe_total_resumed_ms += delta_ms;
+		scnprintf(jprobe_buf, JPROBE_LINE_SZ, "suspended %ld %ld %ld",
+			delta_ms, jprobe_total_suspended_ms, jprobe_total_resumed_ms);
+		idd_jprobe_suspend_hook(jprobe_buf);
+	}
+#endif
+
 	do {
 		error = suspend_enter(state, &wakeup);
 	} while (!error && !wakeup && need_suspend_ops(state)
@@ -278,6 +307,22 @@ int suspend_devices_and_enter(suspend_state_t state)
 	suspend_test_start();
 	dpm_resume_end(PMSG_RESUME);
 	suspend_test_finish("resume devices");
+#ifdef CONFIG_SONY_JPROBE_SUSPEND_HOOK
+	{
+		struct timespec now;
+		struct timespec delta;
+		long int delta_ms;
+
+		get_monotonic_boottime(&now);
+		delta = timespec_sub(now, jprobe_ts);
+		jprobe_ts = now;
+		delta_ms = delta.tv_sec * 1000 + delta.tv_nsec / 1000000;
+		jprobe_total_suspended_ms += delta_ms;
+		scnprintf(jprobe_buf, JPROBE_LINE_SZ, "resumed %ld %ld %ld",
+			delta_ms, jprobe_total_suspended_ms, jprobe_total_resumed_ms);
+		idd_jprobe_suspend_hook(jprobe_buf);
+	}
+#endif
 	ftrace_start();
 	resume_console();
  Close:

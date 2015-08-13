@@ -617,7 +617,8 @@ static int dhd_wl_host_event(dhd_info_t *dhd, int *ifidx, void *pktdata,
 static int dhd_wakelock_waive(dhd_info_t *dhdinfo);
 static int dhd_wakelock_restore(dhd_info_t *dhdinfo);
 
-#if defined(CONFIG_PM_SLEEP)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) && (LINUX_VERSION_CODE <= \
+		KERNEL_VERSION(2, 6, 39)) && defined(CONFIG_PM_SLEEP)
 static int dhd_sleep_pm_callback(struct notifier_block *nfb, unsigned long action, void *ignored)
 {
 	int ret = NOTIFY_DONE;
@@ -648,11 +649,8 @@ static int dhd_sleep_pm_callback(struct notifier_block *nfb, unsigned long actio
 	}
 #endif
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) && (LINUX_VERSION_CODE <= \
-	KERNEL_VERSION(2, 6, 39))
 	dhd_mmc_suspend = suspend;
 	smp_mb();
-#endif
 
 	return ret;
 }
@@ -3516,7 +3514,8 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 	 */
 	memcpy(netdev_priv(net), &dhd, sizeof(dhd));
 
-#if defined(CONFIG_PM_SLEEP)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) && (LINUX_VERSION_CODE <= \
+		KERNEL_VERSION(2, 6, 39)) && defined(CONFIG_PM_SLEEP)
 	dhd->pm_notifier.notifier_call = dhd_sleep_pm_callback;
 	dhd->pm_notifier.priority = 10;
 	register_pm_notifier(&dhd->pm_notifier);
@@ -3850,6 +3849,7 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 	int scan_assoc_time = DHD_SCAN_ASSOC_ACTIVE_TIME;
 	int scan_unassoc_time = DHD_SCAN_UNASSOC_ACTIVE_TIME;
 	int scan_passive_time = DHD_SCAN_PASSIVE_TIME;
+	uint forced_band = WLC_BAND_2G;
 	char buf[WLC_IOCTL_SMLEN];
 	char *ptr;
 	uint32 listen_interval = CUSTOM_LISTEN_INTERVAL; /* Default Listen Interval in Beacons */
@@ -4311,7 +4311,8 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 		sizeof(scan_unassoc_time), TRUE, 0);
 	dhd_wl_ioctl_cmd(dhd, WLC_SET_SCAN_PASSIVE_TIME, (char *)&scan_passive_time,
 		sizeof(scan_passive_time), TRUE, 0);
-
+    dhd_wl_ioctl_cmd(dhd, WLC_SET_BAND, (char *)& forced_band,
+                                        sizeof(forced_band), TRUE, 0);
 #ifdef ARP_OFFLOAD_SUPPORT
 	/* Set and enable ARP offload feature for STA only  */
 #if defined(SOFTAP)

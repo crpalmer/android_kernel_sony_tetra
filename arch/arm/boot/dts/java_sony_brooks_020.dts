@@ -10,7 +10,7 @@
 	compatible = "bcm,java";
 
 	chosen {
-		bootargs = "console=ttyS0,115200n8 mem=448M@0x81E00000 mem=16M@0x9F000000 gpt androidboot.console=ttyS0 quiet crash_ramdump=1 logbuf_nocache=1 vmalloc=136M androidboot.hardware=tetra androidboot.selinux=enforcing";
+		bootargs = "console=ttyS0,115200n8 mem=466M@0x81E00000 mem=16M@0x9F000000 gpt androidboot.console=ttyS0 quiet crash_ramdump=1 logbuf_nocache=1 vmalloc=136M androidboot.hardware=tetra androidboot.selinux=enforcing mtt_log_buffer=256";
 	};
 
 	memory@81e00000{
@@ -133,7 +133,7 @@
 			compatible = "em718x-hub";
 			reg = <0x28>;
 			gpio-irq-pin = <111>;
-			firmware = "em718x/Sony_BMI055_AK09911_pedometerSOMC_tiltSOMC-di02.1.4.6015-4.fw";
+			firmware = "em718x/Sony_BMI055_AK09911_pedometerSOMC_tiltSOMC-di02.1.4.8831-3.fw";
 			feat0-type = "amd";
 			feat0-flag = <3>;
 			feat1-type = "step";
