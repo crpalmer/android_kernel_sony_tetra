@@ -21,6 +21,8 @@
 #include <asm/backlight.h>
 #endif
 
+struct backlight_device *default_backlight;
+
 static const char *const backlight_types[] = {
 	[BACKLIGHT_RAW] = "raw",
 	[BACKLIGHT_PLATFORM] = "platform",
@@ -333,6 +335,8 @@ struct backlight_device *backlight_device_register(const char *name,
 
 	new_bd->ops = ops;
 
+	default_backlight = new_bd;
+
 #ifdef CONFIG_PMAC_BACKLIGHT
 	mutex_lock(&pmac_backlight_mutex);
 	if (!pmac_backlight)
@@ -361,6 +365,9 @@ void backlight_device_unregister(struct backlight_device *bd)
 		pmac_backlight = NULL;
 	mutex_unlock(&pmac_backlight_mutex);
 #endif
+
+	default_backlight = NULL;
+
 	mutex_lock(&bd->ops_lock);
 	bd->ops = NULL;
 	mutex_unlock(&bd->ops_lock);

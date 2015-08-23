@@ -63,6 +63,8 @@
 #include <linux/of_gpio.h>
 #include <linux/wakelock.h>
 
+#include <linux/backlight.h>
+
 #ifdef CONFIG_DEBUG_FS
 #include <linux/debugfs.h>
 #include <linux/kobject.h>
@@ -949,6 +951,31 @@ static ssize_t kona_fb_panel_id_show(struct device *dev,
 							res_da, res_db, res_dc);
 }
 
+extern struct backlight_device *default_backlight;
+
+static ssize_t kona_fb_backlight_brightness_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%d\n", default_backlight ? default_backlight->props.brightness : 0);
+}
+
+static ssize_t kona_fb_backlight_brightness_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	int ret = -EINVAL;
+	uint32_t val;
+
+	if (sscanf(buf, "%i", &val) != 1) {
+		konafb_error("Error, buf = %s\n", buf);
+	} else if (default_backlight) {
+		default_backlight->props.brightness = val;
+		backlight_update_status(default_backlight);
+		ret = count;
+	}
+
+	return ret;
+}
+
 static ssize_t kona_fb_panel_mode_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -1059,6 +1086,9 @@ exit:
 static struct device_attribute panel_attributes[] = {
 	__ATTR(panel_name, S_IRUGO, kona_fb_panel_name_show, NULL),
 	__ATTR(panel_id, S_IRUGO, kona_fb_panel_id_show, NULL),
+	__ATTR(backlight_brightness, S_IRUGO|S_IWUSR|S_IWGRP,
+					kona_fb_backlight_brightness_show,
+					kona_fb_backlight_brightness_store),
 	__ATTR(panel_mode, S_IRUGO|S_IWUSR|S_IWGRP,
 					kona_fb_panel_mode_show,
 					kona_fb_panel_mode_store),
